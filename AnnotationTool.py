@@ -8,12 +8,68 @@ from PIL import Image, ImageTk
 
 class DicomViewer:
     def __init__(self, root):
+        main_frame = tk.Frame(root)
+        main_frame.pack(fill="both", expand=True)
+
+        # Canvas (center / main area)
+        self.canvas = tk.Canvas(main_frame, width=512, height=512, cursor="cross")
+        self.canvas.pack(side="left", fill="both", expand=True)
+
+        self.canvas.bind("<Configure>", self.on_resize)
+
+        # Small legend on right
+        legend_frame = tk.Frame(main_frame, width=220)
+        legend_frame.pack(side="right", fill="y")
+        # legend_frame.pack_propagate(False)
+
+        self.class_info = {
+            0: ("No vessel/s (easy)", "red"),
+            1: ("Vessel/s (easy)", "green"),
+            2: ("No vessel/s (hard)", "blue"),
+            3: ("Vessel/s (hard)", "yellow"),
+        }
+
+        tk.Label(legend_frame, text="Classes", font=("Arial", 12, "bold")).pack(anchor="w")
+
+        for k, (name, color) in self.class_info.items():
+            row = tk.Frame(legend_frame)
+            row.pack(anchor="w", pady=2)
+
+            swatch = tk.Canvas(row, width=12, height=12)
+            swatch.create_rectangle(0, 0, 12, 12, fill=color)
+            swatch.pack(side="left")
+
+            tk.Label(row, font=("Arial", 8), text=f"{k} - {name}").pack(side="left", padx=5)
+
+        self.selected_class_var = tk.StringVar(value="Selected: 0")
+        tk.Label(legend_frame, textvariable=self.selected_class_var, font=("Arial", 9, "bold"), anchor="w",
+                 justify="left").pack(anchor="w", pady=(6, 4))
+
+        self.class_cont = {
+            "Move Up": "↑",
+            "Move Down": "↓",
+            "Move Left": "←",
+            "Move Right": "→",
+            "Zoom In/Out": "+/-",
+            "Next Slice": "PgUp/Scroll ↑",
+            "Prev Slice": "PgDn/Scroll ↓",
+            "Start polygon": "Left Click",
+            "End polygon": "Right Click",
+            "Undo": "Backspace"
+        }
+
+        tk.Label(legend_frame, text="Controls", font=("Arial", 12, "bold")).pack(anchor="w")
+
+        for act, key in self.class_cont.items():
+            row = tk.Frame(legend_frame)
+            row.pack(anchor="w", fill="x", pady=1)
+
+            tk.Label(row, text=act, width=10, font=("Arial", 8, "bold"), anchor="e").grid(row=0, column=0, sticky="w")
+            # tk.Label(row, text=":", width=1).grid(row=0, column=1)
+            tk.Label(row, text=key, width=10, font=("Arial", 8), anchor="w").grid(row=0, column=2, sticky="w", padx=5)
+
         self.root = root
         self.root.title("DICOM Viewer")
-
-        # Canvas FIRST
-        self.canvas = tk.Canvas(root, width=512, height=512, cursor="cross")
-        self.canvas.pack()
 
         # Slider
         # self.slider = tk.Scale(root, from_=0, to=0, orient=tk.HORIZONTAL,
@@ -36,14 +92,24 @@ class DicomViewer:
 
         tk.Button(slider_frame, text=">", command=self.next_slice, width=3).pack(side="left")
 
-        self.zoom = 1.0
-        self.base_size = 512  # original display size
+        self.scale = 1.5
+        self.min_scale = 0.2
+        self.max_scale = 8.0
+        self.offset_x = 0
+        self.offset_y = 0
 
         self.images = []
         self.tk_img = None
         self.current_slice = 0
-        self.x_offset = 0
-        self.y_offset = 0
+
+        self._drag_start = None
+
+        # Labels
+        self.root.bind("0", lambda e: self.set_current_label(0))
+        self.root.bind("1", lambda e: self.set_current_label(1))
+        self.root.bind("2", lambda e: self.set_current_label(2))
+        self.root.bind("3", lambda e: self.set_current_label(3))
+        self.set_current_label(0)
 
         # polygon selection
         self.start_x = self.start_y = None
@@ -52,26 +118,54 @@ class DicomViewer:
         self.current_polygon = []
         self.temp_line = None
 
-        # keep canvas size constant
-        self.canvas.bind("<Button-1>", self.on_click)  # add point
-        self.canvas.bind("<Motion>", self.on_move)  # preview line
-        self.canvas.bind("<Button-3>", self.finish_polygon)  # right-click = close
+        self.canvas.bind("<Button-1>", self.on_click)
+        self.canvas.bind("<Motion>", self.on_move)
+        self.canvas.bind("<Button-3>", self.finish_polygon)
+
+        # move in zoom key binds
+        self.canvas.bind("<MouseWheel>", self.on_scroll)
+        self.canvas.bind("<Button-4>", self.on_scroll)
+        self.canvas.bind("<Button-5>", self.on_scroll)
 
         # bind arrow keys
-        self.root.bind("<Left>", lambda e: self.prev_slice())
-        self.root.bind("<Right>", lambda e: self.next_slice())
+        self.root.bind("<Up>", self.pan_up)
+        self.root.bind("<Down>", self.pan_down)
+        self.root.bind("<Left>", self.pan_left)
+        self.root.bind("<Right>", self.pan_right)
+
+        # zoom
+        self.root.bind("<plus>", self.zoom_in)
+        self.root.bind("<minus>", self.zoom_out)
+        self.root.bind("=", self.zoom_in)  # usually shift + =; alternative keys (more reliable across keyboards)
+        self.root.bind("_", self.zoom_out)  # shift + -
+
+        # move across slides
+        self.root.bind("<Prior>", lambda e: self.prev_slice())  # Page Up
+        self.root.bind("<Next>", lambda e: self.next_slice())  # Page Down
+
+        # Undo
+        self.root.bind("<Return>", self.undo_last())
 
         # Buttons LAST
         btn_frame = tk.Frame(root)
-        btn_frame.pack(pady=5)
+        btn_frame.pack(fill="x", pady=5)
 
         tk.Button(btn_frame, text="Open Folder", command=self.load_folder).pack(side="left", padx=5)
         tk.Button(btn_frame, text="Undo", command=self.undo_last).pack(side="left", padx=5)
         tk.Button(btn_frame, text="Copy last area from previous slice", command=self.copy_last_polygon).pack(side="left", padx=5)
         tk.Button(btn_frame, text="Copy last area from next slice", command=self.copy_next_polygon).pack(side="left", padx=5)
-        tk.Button(btn_frame, text="Zoom In", command=self.zoom_in).pack(side="left", padx=5)
-        tk.Button(btn_frame, text="Zoom Out", command=self.zoom_out).pack(side="left", padx=5)
+        tk.Button(btn_frame, text="Zoom In (+)", command=self.zoom_in).pack(side="left", padx=5)
+        tk.Button(btn_frame, text="Zoom Out (-)", command=self.zoom_out).pack(side="left", padx=5)
+        tk.Button(btn_frame, text="Reset View", command=self.reset_view).pack(side="left", padx=5)
         tk.Button(btn_frame, text="Save Boxes (JSON)", command=self.save_json).pack(side="left", padx=5)
+
+        # self.label_var = tk.StringVar(value="0")
+
+        # tk.Entry(btn_frame, textvariable=self.label_var, width=5).pack(side="left")
+
+    def set_current_label(self, label):
+        self.current_label = label
+        self.selected_class_var.set(f"Selected: {label}")
 
     def prev_slice(self):
         if self.current_slice > 0:
@@ -101,6 +195,14 @@ class DicomViewer:
         dicoms.sort(key=lambda x: getattr(x, "InstanceNumber", 0))
 
         self.images = []
+
+        self.scale = 1.0
+        self.offset_x = 0
+        self.offset_y = 0
+
+        self.slider.config(to=len(self.images) - 1)
+        self.slider.set(0)
+        self.update_slice(0)
 
         def apply_window(d):
             img = d.pixel_array.astype(np.float32)
@@ -132,6 +234,27 @@ class DicomViewer:
         self.slider.set(0)
         self.update_slice(0)
 
+    def update_center(self):
+        self.center_x = self.canvas.winfo_width() / 2 + self.offset_x
+        self.center_y = self.canvas.winfo_height() / 2 + self.offset_y
+
+    def draw_image(self):
+        if self.tk_img is None:
+            return
+
+        self.canvas.delete("all")
+
+        self.update_center()
+
+        self.canvas.create_image(
+            self.center_x,
+            self.center_y,
+            image=self.tk_img,
+            anchor="center"
+        )
+
+        self.draw_polygons()
+
     def update_slice(self, val):
         if not self.images:
             return
@@ -139,51 +262,111 @@ class DicomViewer:
         self.current_slice = int(val)
         img = self.images[self.current_slice]
 
-        canvas_w = 512
-        canvas_h = 512
+        h, w = img.shape
 
-        size = max(10, int(self.base_size * self.zoom))
-        pil_img = Image.fromarray(img).resize((size, size))
-        self.tk_img = ImageTk.PhotoImage(pil_img)
+        disp = Image.fromarray(img).resize(
+            (int(w * self.scale), int(h * self.scale))
+        )
 
-        self.canvas.delete("all")
+        self.tk_img = ImageTk.PhotoImage(disp)
 
-        self.x_offset = (canvas_w - size) // 2
-        self.y_offset = (canvas_h - size) // 2
+        self.draw_image()
 
-        self.canvas.create_image(self.x_offset, self.y_offset,
-                                 anchor="nw", image=self.tk_img)
-
+    def draw_polygons(self):
         polys = self.annotations.get(self.current_slice, [])
-        for poly in polys:
+
+        for poly, label in polys:
             coords = []
             for x, y in poly:
-                coords.extend([
-                    x * self.zoom + self.x_offset,
-                    y * self.zoom + self.y_offset
-                ])
-            self.canvas.create_polygon(coords, outline="red", fill="", width=2)
+                cx, cy = self.image_to_canvas(x, y)
+                coords.extend([cx, cy])
+
+            color = self.class_info.get(label, ("", "red"))[1]
+
+            self.canvas.create_polygon(
+                coords,
+                outline=color,
+                fill="",
+                width=2
+            )
+
+    def image_to_canvas(self, x, y):
+        img_h, img_w = self.images[self.current_slice].shape
+
+        sx = (x - img_w / 2) * self.scale
+        sy = (y - img_h / 2) * self.scale
+
+        cx = self.center_x + sx
+        cy = self.center_y + sy
+
+        return cx, cy
+
+    def on_resize(self, event):
+        self.draw_image()
+
+    def on_scroll(self, event):
+        if not self.images:
+            return
+
+        if hasattr(event, "delta"):
+            step = 1 if event.delta > 0 else -1
+        else:
+            step = 1 if event.num == 4 else -1
+
+        new_idx = self.current_slice + step
+        new_idx = max(0, min(len(self.images) - 1, new_idx))
+
+        self.slider.set(new_idx)
+        self.update_slice(new_idx)
+
+    def pan_up(self, event):
+        self.offset_y += 20
+        self.draw_image()
+
+    def pan_down(self, event):
+        self.offset_y -= 20
+        self.draw_image()
+
+    def pan_left(self, event):
+        self.offset_x += 20
+        self.draw_image()
+
+    def pan_right(self, event):
+        self.offset_x -= 20
+        self.draw_image()
+
+    def reset_view(self):
+        self.scale = 1.5
+        self.offset_x = 0
+        self.offset_y = 0
+
+        self.update_slice(self.current_slice)
+
+    def canvas_to_image(self, cx, cy):
+        img_h, img_w = self.images[self.current_slice].shape
+
+        x = (cx - self.center_x) / self.scale + img_w / 2
+        y = (cy - self.center_y) / self.scale + img_h / 2
+
+        return x, y
 
     def on_click(self, event):
-        x = (event.x - self.x_offset) / self.zoom
-        y = (event.y - self.y_offset) / self.zoom
-
+        x, y = self.canvas_to_image(event.x, event.y)
         self.current_polygon.append((x, y))
 
-        # draw point
         r = 2
-        self.canvas.create_oval(event.x - r, event.y - r, event.x + r, event.y + r, fill="yellow")
+        self.canvas.create_oval(event.x - r, event.y - r,
+                                event.x + r, event.y + r,
+                                fill="yellow")
 
-        # draw line from previous point
         if len(self.current_polygon) > 1:
             x1, y1 = self.current_polygon[-2]
             x2, y2 = self.current_polygon[-1]
 
-            self.canvas.create_line(
-                x1 * self.zoom + self.x_offset, y1 * self.zoom + self.y_offset,
-                x2 * self.zoom + self.x_offset, y2 * self.zoom + self.y_offset,
-                fill="green", width=2
-            )
+            c1 = self.image_to_canvas(x1, y1)
+            c2 = self.image_to_canvas(x2, y2)
+
+            self.canvas.create_line(*c1, *c2, fill="green", width=2)
 
     def on_move(self, event):
         if not self.current_polygon:
@@ -193,10 +376,10 @@ class DicomViewer:
             self.canvas.delete(self.temp_line)
 
         x1, y1 = self.current_polygon[-1]
+        c1 = self.image_to_canvas(x1, y1)
 
         self.temp_line = self.canvas.create_line(
-            x1 * self.zoom + self.x_offset,
-            y1 * self.zoom + self.y_offset,
+            c1[0], c1[1],
             event.x, event.y,
             fill="gray", dash=(2, 2)
         )
@@ -210,7 +393,10 @@ class DicomViewer:
         if s not in self.annotations:
             self.annotations[s] = []
 
-        self.annotations[s].append(self.current_polygon.copy())
+        self.annotations[s].append(
+            (self.current_polygon.copy(), self.current_label)
+        )
+
         self.current_polygon = []
 
         if self.temp_line:
@@ -218,7 +404,6 @@ class DicomViewer:
             self.temp_line = None
 
         self.update_slice(self.current_slice)
-
 
 
     def on_press(self, event):
@@ -263,41 +448,36 @@ class DicomViewer:
 
         if prev_slice not in self.annotations:
             return
-
         if not self.annotations[prev_slice]:
             return
 
-        last_poly = self.annotations[prev_slice][-1]
+        last_poly, label = self.annotations[prev_slice][-1]
 
         if self.current_slice not in self.annotations:
             self.annotations[self.current_slice] = []
 
-        # deep copy points
-        new_poly = [(x, y) for x, y in last_poly]
-        self.annotations[self.current_slice].append(new_poly)
+        self.annotations[self.current_slice].append(
+            (last_poly.copy(), label)
+        )
 
         self.update_slice(self.current_slice)
 
     def copy_next_polygon(self):
-        if self.current_slice == 0:
-            return
-
         next_slice = self.current_slice + 1
 
         if next_slice not in self.annotations:
             return
-
         if not self.annotations[next_slice]:
             return
 
-        last_poly_n = self.annotations[next_slice][-1]
+        next_poly, label = self.annotations[next_slice][-1]
 
         if self.current_slice not in self.annotations:
             self.annotations[self.current_slice] = []
 
-        # deep copy points
-        new_poly = [(x, y) for x, y in last_poly_n]
-        self.annotations[self.current_slice].append(new_poly)
+        self.annotations[self.current_slice].append(
+            (next_poly.copy(), label)
+        )
 
         self.update_slice(self.current_slice)
 
@@ -306,16 +486,52 @@ class DicomViewer:
         if not path:
             return
 
+        export = {
+            "image_count": len(self.images),
+            "annotations": {}
+        }
+
+        for slice_idx, polys in self.annotations.items():
+            export["annotations"][slice_idx] = [
+                {
+                    "label": int(label),
+                    "points": [[float(x), float(y)] for (x, y) in poly]
+                }
+                for poly, label in polys
+            ]
+
         with open(path, "w") as f:
-            json.dump(self.annotations, f, indent=2)
+            json.dump(export, f, indent=2)
 
-    def zoom_in(self):
-        self.zoom *= 1.25
+    def on_zoom(self, event):
+        factor = 1.1 if getattr(event, "delta", 0) > 0 or getattr(event, "num", None) == 4 else 0.9
+
+        new_scale = max(self.min_scale, min(self.max_scale, self.scale * factor))
+
+        self.scale = new_scale
+        self.draw_image()
+
+    def zoom_in(self, event=None):
+        self.scale *= 1.25
         self.update_slice(self.current_slice)
 
-    def zoom_out(self):
-        self.zoom /= 1.25
+    def zoom_out(self, event=None):
+        self.scale /= 1.25
         self.update_slice(self.current_slice)
+
+    def start_pan(self, event):
+        self._drag_start = (event.x, event.y)
+
+    def do_pan(self, event):
+        dx = event.x - self._drag_start[0]
+        dy = event.y - self._drag_start[1]
+
+        self.offset_x += dx
+        self.offset_y += dy
+
+        self._drag_start = (event.x, event.y)
+
+        self.draw_image()
 
 if __name__ == "__main__":
     root = tk.Tk()
