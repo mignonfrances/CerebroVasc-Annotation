@@ -23,10 +23,11 @@ class DicomViewer:
         # legend_frame.pack_propagate(False)
 
         self.class_info = {
-            0: ("No vessel/s (easy)", "red"),
             1: ("Vessel/s (easy)", "green"),
-            2: ("No vessel/s (hard)", "blue"),
-            3: ("Vessel/s (hard)", "yellow"),
+            2: ("Vessel/s (hard)", "yellow"),
+            3: ("Indistinguishable blush", "magenta"),
+            4: ("No vessel/s (hard)", "blue"),
+            5: ("No vessel/s (easy)", "cyan")
         }
 
         tk.Label(legend_frame, text="Classes", font=("Arial", 12, "bold")).pack(anchor="w")
@@ -41,7 +42,7 @@ class DicomViewer:
 
             tk.Label(row, font=("Arial", 8), text=f"{k} - {name}").pack(side="left", padx=5)
 
-        self.selected_class_var = tk.StringVar(value="Selected: 0")
+        self.selected_class_var = tk.StringVar(value="Selected: 1 - Vessel/s (easy)")
         tk.Label(legend_frame, textvariable=self.selected_class_var, font=("Arial", 9, "bold"), anchor="w",
                  justify="left").pack(anchor="w", pady=(6, 4))
 
@@ -105,11 +106,12 @@ class DicomViewer:
         self._drag_start = None
 
         # Labels
-        self.root.bind("0", lambda e: self.set_current_label(0))
         self.root.bind("1", lambda e: self.set_current_label(1))
         self.root.bind("2", lambda e: self.set_current_label(2))
         self.root.bind("3", lambda e: self.set_current_label(3))
-        self.set_current_label(0)
+        self.root.bind("4", lambda e: self.set_current_label(4))
+        self.root.bind("5", lambda e: self.set_current_label(5))
+        self.set_current_label(1)
 
         # polygon selection
         self.start_x = self.start_y = None
@@ -165,7 +167,8 @@ class DicomViewer:
 
     def set_current_label(self, label):
         self.current_label = label
-        self.selected_class_var.set(f"Selected: {label}")
+        class_name = self.class_info.get(label, ("Unknown", ""))[0]
+        self.selected_class_var.set(f"Selected: {label} - {class_name}")
 
     def prev_slice(self):
         if self.current_slice > 0:
@@ -366,7 +369,7 @@ class DicomViewer:
             c1 = self.image_to_canvas(x1, y1)
             c2 = self.image_to_canvas(x2, y2)
 
-            self.canvas.create_line(*c1, *c2, fill="green", width=2)
+            self.canvas.create_line(*c1, *c2, fill="red", width=2, dash=(1, 3))
 
     def on_move(self, event):
         if not self.current_polygon:
