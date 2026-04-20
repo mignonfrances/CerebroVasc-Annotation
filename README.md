@@ -11,7 +11,8 @@ Python GUI for viewing DICOM image stacks with basic annotation tools. Supports 
 * Load a folder of DICOM files (auto-sorted by `InstanceNumber`)
 * Indicate annotation classes
 
-```1: Vessel/s (easy),
+```
+   1: Vessel/s (easy),
    2: Vessel/s (hard),
    3: Indistinguishable blush,
    4: No vessel/s (hard),
