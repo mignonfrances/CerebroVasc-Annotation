@@ -1,5 +1,6 @@
 # DICOM Viewer with Annotation (Tkinter)
-<img width="1319" height="935" alt="image" src="https://github.com/user-attachments/assets/61661b13-c2f1-4dbc-812a-c4637a332f08" />
+<img width="1318" height="932" alt="image" src="https://github.com/user-attachments/assets/19323362-a3a3-454c-ab08-12c28bfa641c" />
+
 
 ## Overview
 
@@ -13,8 +14,8 @@ Python GUI for viewing DICOM image stacks with basic annotation tools. Supports 
 * Indicate annotation classes
 
 ```
-   1: Vessel/s (easy),
-   2: Vessel/s (hard),
+   1: Cortical vessel,
+   2: Surface vessel,
    3: Indistinguishable blush,
    4: No vessel/s (hard),
    5: No vessel/s (easy)
