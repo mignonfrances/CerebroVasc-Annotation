@@ -5,6 +5,7 @@ from tkinter import filedialog
 import numpy as np
 import pydicom
 from PIL import Image, ImageTk
+from datetime import datetime
 
 class DicomViewer:
     def __init__(self, root):
@@ -23,8 +24,8 @@ class DicomViewer:
         # legend_frame.pack_propagate(False)
 
         self.class_info = {
-            1: ("Vessel/s (easy)", "green"),
-            2: ("Vessel/s (hard)", "yellow"),
+            1: ("Cortical vessel", "green"),
+            2: ("Surface vessel", "yellow"),
             3: ("Indistinguishable blush", "magenta"),
             4: ("No vessel/s (hard)", "blue"),
             5: ("No vessel/s (easy)", "cyan")
@@ -47,16 +48,17 @@ class DicomViewer:
                  justify="left").pack(anchor="w", pady=(6, 4))
 
         self.class_cont = {
-            "Move Up": "↑",
-            "Move Down": "↓",
-            "Move Left": "←",
-            "Move Right": "→",
-            "Zoom In/Out": "+/-",
-            "Next Slice": "PgUp/Scroll ↑",
-            "Prev Slice": "PgDn/Scroll ↓",
+            "Pan Up": "W",
+            "Pan Down": "S",
+            "Pan Left": "A",
+            "Pan Right": "D",
+            "Zoom In": "E or Ctrl+Scroll ↑",
+            "Zoom Out": "Q or Ctrl+Scroll ↓",
+            "Next Slice": "Z or Scroll ↑",
+            "Prev Slice": "C or Scroll ↓",
             "Start polygon": "Left Click",
             "End polygon": "Right Click",
-            "Undo": "Backspace"
+            "Undo": "X or Ctrl+Z"
         }
 
         tk.Label(legend_frame, text="Controls", font=("Arial", 12, "bold")).pack(anchor="w")
@@ -93,6 +95,8 @@ class DicomViewer:
 
         tk.Button(slider_frame, text=">", command=self.next_slice, width=3).pack(side="left")
 
+        self.current_folder = "Unknown"
+
         self.scale = 1.5
         self.min_scale = 0.2
         self.max_scale = 8.0
@@ -124,29 +128,24 @@ class DicomViewer:
         self.canvas.bind("<Motion>", self.on_move)
         self.canvas.bind("<Button-3>", self.finish_polygon)
 
-        # move in zoom key binds
-        self.canvas.bind("<MouseWheel>", self.on_scroll)
-        self.canvas.bind("<Button-4>", self.on_scroll)
-        self.canvas.bind("<Button-5>", self.on_scroll)
-
         # bind arrow keys
-        self.root.bind("<Up>", self.pan_up)
-        self.root.bind("<Down>", self.pan_down)
-        self.root.bind("<Left>", self.pan_left)
-        self.root.bind("<Right>", self.pan_right)
+        self.root.bind("<w>", self.pan_up)
+        self.root.bind("<s>", self.pan_down)
+        self.root.bind("<a>", self.pan_left)
+        self.root.bind("<d>", self.pan_right)
 
         # zoom
-        self.root.bind("<plus>", self.zoom_in)
-        self.root.bind("<minus>", self.zoom_out)
-        self.root.bind("=", self.zoom_in)  # usually shift + =; alternative keys (more reliable across keyboards)
-        self.root.bind("_", self.zoom_out)  # shift + -
+        self.root.bind("<e>", self.zoom_in)
+        self.root.bind("<q>", self.zoom_out)
 
-        # move across slides
-        self.root.bind("<Prior>", lambda e: self.prev_slice())  # Page Up
-        self.root.bind("<Next>", lambda e: self.next_slice())  # Page Down
+        # move across slides with mouse wheel
+        self.canvas.bind("<MouseWheel>", self.on_mousewheel)  # Windows
+        self.canvas.bind("<Button-4>", self.on_mousewheel)  # Linux scroll up
+        self.canvas.bind("<Button-5>", self.on_mousewheel)  # Linux scroll down
 
         # Undo
-        self.root.bind("<Return>", self.undo_last())
+        self.root.bind("<x>", self.undo_last)
+        self.root.bind("<Control-z>", self.undo_last)
 
         # Buttons LAST
         btn_frame = tk.Frame(root)
@@ -180,12 +179,27 @@ class DicomViewer:
             self.current_slice += 1
             self.slider.set(self.current_slice)
 
+    def on_mousewheel(self, event):
+        if hasattr(event, "delta"):  # Windows / macOS
+            if event.delta > 0:
+                self.next_slice()
+            else:
+                self.prev_slice()
+        else:  # Linux
+            if event.num == 4:
+                self.next_slice()
+            elif event.num == 5:
+                self.prev_slice()
+
     def load_folder(self):
         folder = filedialog.askdirectory()
         if not folder:
             return
 
+        self.current_folder = os.path.basename(folder)  # Add this line
+
         files = [os.path.join(folder, f) for f in os.listdir(folder)]
+
         dicoms = []
         for f in files:
             try:
@@ -437,7 +451,7 @@ class DicomViewer:
             self.rect = None
             self.update_slice(self.current_slice)
 
-    def undo_last(self):
+    def undo_last(self, event=None):
         s = self.current_slice
         if s in self.annotations and self.annotations[s]:
             self.annotations[s].pop()
@@ -484,28 +498,6 @@ class DicomViewer:
 
         self.update_slice(self.current_slice)
 
-    def save_json(self):
-        path = filedialog.asksaveasfilename(defaultextension=".json")
-        if not path:
-            return
-
-        export = {
-            "image_count": len(self.images),
-            "annotations": {}
-        }
-
-        for slice_idx, polys in self.annotations.items():
-            export["annotations"][slice_idx] = [
-                {
-                    "label": int(label),
-                    "points": [[float(x), float(y)] for (x, y) in poly]
-                }
-                for poly, label in polys
-            ]
-
-        with open(path, "w") as f:
-            json.dump(export, f, indent=2)
-
     def on_zoom(self, event):
         factor = 1.1 if getattr(event, "delta", 0) > 0 or getattr(event, "num", None) == 4 else 0.9
 
@@ -535,6 +527,44 @@ class DicomViewer:
         self._drag_start = (event.x, event.y)
 
         self.draw_image()
+
+    def save_json(self):
+        # Generate filename with date, time, and folder name
+        now = datetime.now()
+        date_str = now.strftime("%Y-%m-%d")
+        time_str = now.strftime("%H-%M-%S")
+        folder_name = getattr(self, "current_folder", "Unknown")
+
+        filename = f"{folder_name}_{date_str}_{time_str}.json"
+
+        path = filedialog.asksaveasfilename(
+            defaultextension=".json",
+            initialfile=filename,
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
+        )
+        if not path:
+            return
+
+        export = {
+            "timestamp": now.isoformat(),
+            "date": date_str,
+            "time": time_str,
+            "folder_name": folder_name,
+            "image_count": len(self.images),
+            "annotations": {}
+        }
+
+        for slice_idx, polys in self.annotations.items():
+            export["annotations"][slice_idx] = [
+                {
+                    "label": int(label),
+                    "points": [[float(x), float(y)] for (x, y) in poly]
+                }
+                for poly, label in polys
+            ]
+
+        with open(path, "w") as f:
+            json.dump(export, f, indent=2)
 
 if __name__ == "__main__":
     root = tk.Tk()
