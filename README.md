@@ -1,5 +1,6 @@
 # DICOM Viewer with Annotation (Tkinter)
-<img width="1318" height="932" alt="image" src="https://github.com/user-attachments/assets/19323362-a3a3-454c-ab08-12c28bfa641c" />
+<img width="1318" height="932" alt="image" src="https://github.com/user-attachments/assets/30177816-56c0-47ad-96e3-c11fbe61f0ed" />
+
 
 
 ## Overview
