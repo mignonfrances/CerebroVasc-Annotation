@@ -38,14 +38,14 @@ Python GUI for viewing DICOM image stacks with basic annotation tools. Supports 
 ---
 ## Summary of Setup using Windows
 
-1. In unzipped folder -> right click -> Open In Terminal
+Unzip the downloaded folder -> Open unzipped folder and right-click anywhere -> Select 'Open In Terminal' ->
 Type/copy+paste each line then hit enter:
-2. py -m venv venv
-3. Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-4. .\venv\Scripts\Activate.ps1
-5. python -m pip install --upgrade pip
-6. pip install -r requirements.txt
-7. python AnnotationTool.py
+1. py -m venv venv
+2. Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+3. .\venv\Scripts\Activate.ps1
+4. python -m pip install --upgrade pip
+5. pip install -r requirements.txt
+6. python AnnotationTool.py
 ---
 
 ## Setup (Recommended)
